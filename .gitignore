@@ -21,3 +21,22 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
+
+# SSH keys
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+jenkin-terraform
+jenkin-terraform.pub
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Node
+node_modules/
+.env
