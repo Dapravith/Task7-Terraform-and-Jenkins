@@ -4,11 +4,11 @@ output "public_ip" {
 }
 
 output "app_url" {
-  description = "Application URL"
-  value       = "http://${aws_instance.foodexpress_ec2.public_ip}"
+  description = "FoodExpress API URL"
+  value       = "http://${aws_instance.foodexpress_ec2.public_ip}:7000"
 }
 
 output "health_url" {
-  description = "Health check URL"
-  value       = "http://${aws_instance.foodexpress_ec2.public_ip}/health"
+  description = "FoodExpress health check URL"
+  value       = "http://${aws_instance.foodexpress_ec2.public_ip}:7000/health"
 }

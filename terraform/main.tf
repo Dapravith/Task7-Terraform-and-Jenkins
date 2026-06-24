@@ -52,7 +52,7 @@ resource "aws_security_group" "foodexpress_sg" {
     to_port     = 3000
     protocol    = "tcp"
 
-    # Optional. You do not need this if you map Docker as -p 80:3000.
+    # Optional. You do not need this if you map Docker as -p 80:7000.
     cidr_blocks = ["0.0.0.0/0"]
   }
 
