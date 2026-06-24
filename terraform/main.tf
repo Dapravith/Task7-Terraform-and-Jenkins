@@ -39,11 +39,11 @@ resource "aws_security_group" "foodexpress_sg" {
   }
 
   ingress {
-    description = "Allow HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  description = "Allow App Port 7000"
+  from_port   = 7000
+  to_port     = 7000
+  protocol    = "tcp"
+  cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
