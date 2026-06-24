@@ -9,19 +9,21 @@ pipeline {
         TAG = "${env.BUILD_NUMBER}"
 
         CONTAINER_NAME = "foodexpress"
+
+        // App runs on port 7000
         APP_PORT = "7000"
-        HOST_PORT = "80"
+
+        // EC2 public port also 7000
+        HOST_PORT = "7000"
 
         KEY_NAME = "foodexpress-auto-key"
         TF_DIR = "terraform"
 
-        // If Dockerfile is inside app folder, keep "app"
-        // If Dockerfile is in root folder, change to "."
-        APP_DIR = "app"
+        // Change this if your Dockerfile folder has another name
+        APP_DIR = "Food-Express-API"
     }
 
     stages {
-
         stage("Checkout Code") {
             steps {
                 git branch: "main", url: "https://github.com/Dapravith/Task7-Terraform-and-Jenkins.git"
@@ -32,7 +34,6 @@ pipeline {
             steps {
                 sh '''
                     set -e
-
                     echo "Checking required tools..."
 
                     docker --version
@@ -47,14 +48,18 @@ pipeline {
 
         stage("Validate AWS Credentials") {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'aws-creds'
-                ]]) {
+                withCredentials([
+                    string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                    string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                ]) {
                     sh '''
                         set -e
-
                         echo "Validating AWS credentials..."
+
+                        export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
+                        export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}"
+                        export AWS_DEFAULT_REGION="${AWS_REGION}"
+
                         aws sts get-caller-identity
 
                         echo "AWS credentials are valid."
@@ -90,7 +95,7 @@ pipeline {
                 sh '''
                     set -e
 
-                    echo "Building Docker image..."
+                    echo "Building Docker image from ${APP_DIR}..."
                     docker build -t ${IMAGE_NAME}:${TAG} ${APP_DIR}
                     docker tag ${IMAGE_NAME}:${TAG} ${IMAGE_NAME}:latest
 
@@ -105,12 +110,11 @@ pipeline {
                 sh '''
                     set -e
 
-                    echo "Saving Docker image to tar..."
+                    echo "Saving Docker image to TAR..."
                     rm -f ${IMAGE_TAR}
 
                     docker save -o ${IMAGE_TAR} ${IMAGE_NAME}:${TAG}
 
-                    echo "Docker image tar file:"
                     ls -lh ${IMAGE_TAR}
                 '''
             }
@@ -119,12 +123,16 @@ pipeline {
         stage("Terraform Init Validate Plan") {
             steps {
                 dir("${TF_DIR}") {
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-creds'
-                    ]]) {
+                    withCredentials([
+                        string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
                         sh '''
                             set -e
+
+                            export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
+                            export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}"
+                            export AWS_DEFAULT_REGION="${AWS_REGION}"
 
                             echo "Initializing Terraform..."
                             terraform init -input=false
@@ -149,12 +157,16 @@ pipeline {
         stage("Terraform Apply") {
             steps {
                 dir("${TF_DIR}") {
-                    withCredentials([[
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        credentialsId: 'aws-creds'
-                    ]]) {
+                    withCredentials([
+                        string(credentialsId: 'aws-access-key-id', variable: 'AWS_ACCESS_KEY_ID'),
+                        string(credentialsId: 'aws-secret-access-key', variable: 'AWS_SECRET_ACCESS_KEY')
+                    ]) {
                         sh '''
                             set -e
+
+                            export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
+                            export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}"
+                            export AWS_DEFAULT_REGION="${AWS_REGION}"
 
                             echo "Applying Terraform..."
                             terraform apply -auto-approve -input=false tfplan
@@ -238,10 +250,8 @@ pipeline {
                         -i sshkey/id_rsa \
                         ubuntu@${EC2_PUBLIC_IP} "
                             set -e
-
                             docker --version || sudo docker --version
                             sudo systemctl is-active docker
-
                             echo 'Docker is ready.'
                         "
                 '''
@@ -312,7 +322,7 @@ EOF
                             sudo docker stop ${CONTAINER_NAME} || true
                             sudo docker rm ${CONTAINER_NAME} || true
 
-                            echo 'Starting new container...'
+                            echo 'Starting new container on port ${HOST_PORT}:${APP_PORT}...'
                             sudo docker run -d \
                                 --name ${CONTAINER_NAME} \
                                 --restart unless-stopped \
@@ -324,7 +334,7 @@ EOF
                             sudo docker ps
 
                             echo 'Container logs:'
-                            sudo docker logs ${CONTAINER_NAME} --tail 30 || true
+                            sudo docker logs ${CONTAINER_NAME} --tail 50 || true
 
                             echo 'Cleaning temporary tar file...'
                             rm -f /home/ubuntu/${IMAGE_TAR}
@@ -340,8 +350,11 @@ EOF
 
                     echo "Checking application health..."
 
+                    APP_URL="http://${EC2_PUBLIC_IP}:${HOST_PORT}/health"
+                    echo "Testing ${APP_URL}"
+
                     for i in $(seq 1 20); do
-                        if curl -fsS http://${EC2_PUBLIC_IP}/health; then
+                        if curl -fsS "${APP_URL}"; then
                             echo "Application is healthy."
                             exit 0
                         fi
@@ -360,8 +373,8 @@ EOF
     post {
         success {
             echo "Deployment successful."
-            echo "Application URL: http://${EC2_PUBLIC_IP}"
-            echo "Health Check URL: http://${EC2_PUBLIC_IP}/health"
+            echo "Application URL: http://${EC2_PUBLIC_IP}:${HOST_PORT}"
+            echo "Health Check URL: http://${EC2_PUBLIC_IP}:${HOST_PORT}/health"
         }
 
         failure {
