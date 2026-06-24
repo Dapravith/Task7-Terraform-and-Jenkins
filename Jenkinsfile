@@ -1,6 +1,12 @@
 pipeline {
     agent any
 
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
     environment {
         AWS_REGION = "us-east-1"
 
@@ -10,16 +16,12 @@ pipeline {
 
         CONTAINER_NAME = "foodexpress"
 
-        // App runs on port 7000
+        // App and EC2 public port
         APP_PORT = "7000"
-
-        // EC2 public port also 7000
         HOST_PORT = "7000"
 
         KEY_NAME = "foodexpress-auto-key"
         TF_DIR = "terraform"
-
-        // Change this if your Dockerfile folder has another name
         APP_DIR = "Food-Express-API"
     }
 
@@ -30,16 +32,44 @@ pipeline {
             }
         }
 
+        stage("Verify Project Structure") {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "Checking project structure..."
+                    pwd
+                    ls -la
+
+                    echo "Checking app directory..."
+                    test -d ${APP_DIR}
+                    test -f ${APP_DIR}/Dockerfile
+                    test -f ${APP_DIR}/package.json
+
+                    echo "Checking terraform directory..."
+                    test -d ${TF_DIR}
+                    test -f ${TF_DIR}/main.tf
+                    test -f ${TF_DIR}/provider.tf
+                    test -f ${TF_DIR}/variables.tf
+                    test -f ${TF_DIR}/outputs.tf
+
+                    echo "Project structure is valid."
+                '''
+            }
+        }
+
         stage("Verify Required Tools") {
             steps {
                 sh '''
                     set -e
+
                     echo "Checking required tools..."
 
                     docker --version
                     terraform version
                     aws --version
                     ssh -V || true
+                    scp -V || true
 
                     echo "Required tools are available."
                 '''
@@ -54,6 +84,7 @@ pipeline {
                 ]) {
                     sh '''
                         set -e
+
                         echo "Validating AWS credentials..."
 
                         export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
@@ -85,6 +116,9 @@ pipeline {
                     chmod 600 sshkey/id_rsa
                     chmod 644 sshkey/id_rsa.pub
 
+                    echo "Public key format:"
+                    head -c 20 sshkey/id_rsa.pub
+                    echo ""
                     echo "SSH key pair is ready."
                 '''
             }
@@ -96,8 +130,11 @@ pipeline {
                     set -e
 
                     echo "Building Docker image from ${APP_DIR}..."
-                    docker build -t ${IMAGE_NAME}:${TAG} ${APP_DIR}
-                    docker tag ${IMAGE_NAME}:${TAG} ${IMAGE_NAME}:latest
+
+                    docker build \
+                        -t ${IMAGE_NAME}:${TAG} \
+                        -t ${IMAGE_NAME}:latest \
+                        ${APP_DIR}
 
                     echo "Docker image built successfully:"
                     docker images | grep ${IMAGE_NAME}
@@ -115,6 +152,7 @@ pipeline {
 
                     docker save -o ${IMAGE_TAR} ${IMAGE_NAME}:${TAG}
 
+                    echo "Docker TAR file:"
                     ls -lh ${IMAGE_TAR}
                 '''
             }
@@ -190,6 +228,7 @@ pipeline {
                 }
 
                 echo "EC2 Public IP: ${env.EC2_PUBLIC_IP}"
+                echo "Application URL: http://${env.EC2_PUBLIC_IP}:${HOST_PORT}"
             }
         }
 
@@ -250,9 +289,11 @@ pipeline {
                         -i sshkey/id_rsa \
                         ubuntu@${EC2_PUBLIC_IP} "
                             set -e
-                            docker --version || sudo docker --version
+
+                            sudo docker --version
                             sudo systemctl is-active docker
-                            echo 'Docker is ready.'
+
+                            echo 'Docker is ready on EC2.'
                         "
                 '''
             }
@@ -266,7 +307,7 @@ pipeline {
                     sh '''
                         set -e
 
-                        echo "Creating runtime env file..."
+                        echo "Creating runtime environment file..."
 
                         cat > foodexpress.env <<EOF
 NODE_ENV=production
@@ -275,6 +316,8 @@ JWT_SECRET=${JWT_SECRET}
 EOF
 
                         chmod 600 foodexpress.env
+
+                        echo "Runtime env file created."
                     '''
                 }
             }
@@ -298,6 +341,8 @@ EOF
                         -i sshkey/id_rsa \
                         foodexpress.env \
                         ubuntu@${EC2_PUBLIC_IP}:/home/ubuntu/
+
+                    echo "Files copied to EC2."
                 '''
             }
         }
@@ -315,12 +360,17 @@ EOF
                         ubuntu@${EC2_PUBLIC_IP} "
                             set -e
 
+                            echo 'Files in /home/ubuntu:'
+                            ls -lh /home/ubuntu/
+
                             echo 'Loading Docker image...'
                             sudo docker load -i /home/ubuntu/${IMAGE_TAR}
 
-                            echo 'Stopping old container if exists...'
+                            echo 'Stopping old containers if they exist...'
                             sudo docker stop ${CONTAINER_NAME} || true
                             sudo docker rm ${CONTAINER_NAME} || true
+                            sudo docker stop foodexpress-api || true
+                            sudo docker rm foodexpress-api || true
 
                             echo 'Starting new container on port ${HOST_PORT}:${APP_PORT}...'
                             sudo docker run -d \
@@ -336,8 +386,10 @@ EOF
                             echo 'Container logs:'
                             sudo docker logs ${CONTAINER_NAME} --tail 50 || true
 
-                            echo 'Cleaning temporary tar file...'
+                            echo 'Cleaning temporary TAR file...'
                             rm -f /home/ubuntu/${IMAGE_TAR}
+
+                            echo 'Deployment on EC2 completed.'
                         "
                 '''
             }
@@ -348,13 +400,14 @@ EOF
                 sh '''
                     set -e
 
-                    echo "Checking application health..."
-
                     APP_URL="http://${EC2_PUBLIC_IP}:${HOST_PORT}/health"
+
+                    echo "Checking application health..."
                     echo "Testing ${APP_URL}"
 
-                    for i in $(seq 1 20); do
+                    for i in $(seq 1 30); do
                         if curl -fsS "${APP_URL}"; then
+                            echo ""
                             echo "Application is healthy."
                             exit 0
                         fi
@@ -364,6 +417,17 @@ EOF
                     done
 
                     echo "Application did not become ready in time."
+
+                    echo "Debugging from EC2..."
+                    ssh -o StrictHostKeyChecking=no \
+                        -o UserKnownHostsFile=/dev/null \
+                        -i sshkey/id_rsa \
+                        ubuntu@${EC2_PUBLIC_IP} "
+                            sudo docker ps -a || true
+                            sudo docker logs ${CONTAINER_NAME} --tail 100 || true
+                            sudo ss -tulnp | grep -E ':${HOST_PORT}|:${APP_PORT}' || true
+                        "
+
                     exit 1
                 '''
             }
