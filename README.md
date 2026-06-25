@@ -1,104 +1,49 @@
-# Task 7: Terraform and Jenkins CI/CD Deployment
+# Task 7 — Terraform and Jenkins CI/CD Deployment
 
-This repository contains a complete CI/CD implementation for deploying a **FoodExpress Node.js API** to **AWS EC2** using **Jenkins**, **Terraform**, **Docker**, and **GitHub**.
+This project demonstrates a clean CI/CD workflow for deploying a **FoodExpress Node.js API** to **AWS EC2** using **GitHub**, **Jenkins**, **Docker**, and **Terraform**.
 
-The pipeline automatically pulls the application source code from GitHub, builds a Docker image, provisions a new EC2 instance using Terraform, copies the Docker image to the EC2 instance, runs the container, and verifies the API through the EC2 public IP.
-
----
-
-## Table of Contents
-
-- [Project Objective](#project-objective)
-- [Architecture Overview](#architecture-overview)
-- [Repository Structure](#repository-structure)
-- [Technology Stack](#technology-stack)
-- [Prerequisites](#prerequisites)
-- [Application Configuration](#application-configuration)
-- [Docker Configuration](#docker-configuration)
-- [Terraform Configuration](#terraform-configuration)
-- [Jenkins Server Setup](#jenkins-server-setup)
-- [Jenkins Credentials](#jenkins-credentials)
-- [Jenkins Pipeline Flow](#jenkins-pipeline-flow)
-- [How to Run the Pipeline](#how-to-run-the-pipeline)
-- [How to Verify the Deployment](#how-to-verify-the-deployment)
-- [Postman Testing](#postman-testing)
-- [Common Errors and Fixes](#common-errors-and-fixes)
-- [Useful Commands](#useful-commands)
-- [Required Assignment Screenshots](#required-assignment-screenshots)
-- [Final Result](#final-result)
-
----
-
-## Project Objective
-
-The goal of this task is to implement a complete DevOps deployment workflow:
-
-1. Jenkins pulls the source code from GitHub.
-2. Jenkins builds the FoodExpress API Docker image.
-3. Jenkins runs Terraform to create an AWS EC2 instance.
-4. Terraform creates:
-   - EC2 instance
-   - Security group
-   - SSH key pair
-5. Jenkins copies the Docker image to the new EC2 instance.
-6. Jenkins runs the Docker container on the EC2 instance.
-7. The API becomes accessible using the EC2 public IP.
-
-Final API format:
-
-```bash
-http://EC2_PUBLIC_IP:7000/health
-```
-
----
-
-## Architecture Overview
+The main flow is:
 
 ```text
-Developer
-   |
-   | git push
-   v
-GitHub Repository
-   |
-   | Jenkins Pipeline Checkout
-   v
-Jenkins Server EC2
-   |
-   | Build Docker image
-   | Run Terraform
-   | Copy Docker image by SCP
-   v
-AWS EC2 App Server
-   |
-   | Run Docker container
-   v
-FoodExpress API
-   |
-   v
-Postman / Browser / curl
-```
-
-Important separation:
-
-```text
-Jenkins EC2
-- Runs Jenkins
-- Runs Docker build
-- Runs Terraform
-- Runs AWS CLI
-- Connects to App EC2 by SSH
-
-App EC2
-- Created by Terraform
-- Runs Docker only
-- Does not run Jenkins
-- Does not need to clone the GitHub repo
+GitHub → Jenkins → Docker Build → Terraform EC2 → Docker Deploy → Postman Test
 ```
 
 ---
 
-## Repository Structure
+## 1. High-Level Flow
+
+```text
+Developer pushes code
+        ↓
+GitHub repository
+        ↓
+Jenkins pipeline checks out the repo
+        ↓
+Jenkins builds a Docker image
+        ↓
+Jenkins runs Terraform
+        ↓
+Terraform creates the App EC2 server
+        ↓
+Jenkins copies the Docker image to App EC2
+        ↓
+App EC2 runs the FoodExpress API container
+        ↓
+User tests the API by EC2 public IP
+```
+
+### EC2 responsibilities
+
+| Server | Responsibility |
+|---|---|
+| Jenkins EC2 | Runs Jenkins, Docker build, Terraform, AWS CLI, SSH/SCP |
+| App EC2 | Created by Terraform and runs only the Dockerized API |
+
+The **App EC2 does not need to clone the GitHub repository**. Jenkins builds the Docker image and sends it to the App EC2.
+
+---
+
+## 2. Repository Structure
 
 ```text
 Task7-Terraform-and-Jenkins/
@@ -118,159 +63,112 @@ Task7-Terraform-and-Jenkins/
 ├── deploy.sh
 ├── Jenkinsfile
 ├── .gitignore
-├── LICENSE
 └── README.md
 ```
 
 ---
 
-## Technology Stack
+## 3. Tools Used
 
 | Tool | Purpose |
 |---|---|
-| GitHub | Source code repository |
-| Jenkins | CI/CD automation server |
-| Docker | Build and run the API container |
-| Terraform | Provision AWS infrastructure |
-| AWS EC2 | Host the application container |
-| AWS Security Group | Control inbound and outbound traffic |
-| Node.js / Express | FoodExpress API backend |
-| Postman | Test deployed API endpoint |
+| GitHub | Stores source code |
+| Jenkins | Runs the CI/CD pipeline |
+| Docker | Builds and runs the API container |
+| Terraform | Provisions AWS infrastructure |
+| AWS EC2 | Hosts Jenkins and the API server |
+| Postman | Tests API endpoints |
 
 ---
 
-## Prerequisites
+## 4. FoodExpress API
 
-Before running the pipeline, prepare the following:
+The API is a simple Express.js application with authentication and item CRUD routes.
 
-### Local machine
+### API port
 
-- Git installed
-- GitHub repository created
-- Project pushed to GitHub
+```text
+7000
+```
 
-### Jenkins EC2 server
+### Public endpoints
 
-Install:
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/` | API home check |
+| GET | `/health` | Health check |
+| POST | `/auth/register` | Register a user |
+| POST | `/auth/login` | Login and receive JWT token |
 
-- Java
-- Jenkins
-- Docker
-- Terraform
-- AWS CLI
-- Git
-- SSH / SCP
+### Protected endpoints
 
-### AWS account
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/auth/me` | Get current user |
+| GET | `/items` | Get all items for logged-in user |
+| POST | `/items` | Create item |
+| GET | `/items/:id` | Get one item |
+| PUT | `/items/:id` | Update item |
+| DELETE | `/items/:id` | Delete item |
 
-Prepare:
+Protected endpoints require this header:
 
-- AWS Access Key ID
-- AWS Secret Access Key
-- AWS Session Token, if using AWS Academy or temporary credentials
-- AWS region, for example `us-east-1`
+```text
+Authorization: Bearer <JWT_TOKEN>
+```
 
 ---
 
-## Application Configuration
+## 5. Required App Configuration
 
-The FoodExpress API runs on port `7000`.
+### `package.json`
 
-### Required `package.json`
+The Dockerfile runs `npm start`, so the app must include a start script.
 
-The application must include a `start` script. Without this script, Docker will fail with:
+```json
+{
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"No tests configured\" && exit 0"
+  }
+}
+```
+
+If this script is missing, Docker will fail with:
 
 ```text
 npm error Missing script: "start"
 ```
 
-Correct configuration:
+### `index.js`
 
-```json
-{
-  "name": "task7-terraform-and-jenkins",
-  "version": "1.0.0",
-  "description": "FoodExpress API for Terraform and Jenkins deployment",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js",
-    "test": "echo \"No tests configured\" && exit 0"
-  },
-  "keywords": [],
-  "author": "Dapravith",
-  "license": "ISC",
-  "dependencies": {
-    "bcryptjs": "^3.0.3",
-    "express": "^5.2.1",
-    "jsonwebtoken": "^9.0.3"
-  }
-}
-```
+The app must listen on `0.0.0.0` so it can receive traffic from outside the container.
 
-### Required Express listen configuration
-
-In `Food-Express-API/index.js`, the server should listen on `0.0.0.0` so it is reachable from outside the container.
-
-```javascript
+```js
 const PORT = process.env.PORT || 7000;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`FoodExpress API running on port ${PORT}`);
-});
-```
-
-### Required health endpoint
-
-```javascript
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "healthy",
-    service: "FoodExpress API"
-  });
+  console.log(`Server start running on port ${PORT}`);
 });
 ```
 
 ---
 
-## Docker Configuration
+## 6. Docker Flow
 
-The Dockerfile is located at:
+Docker builds the API from:
 
 ```text
 Food-Express-API/Dockerfile
 ```
 
-Example Dockerfile:
+The container maps:
 
-```dockerfile
-FROM node:18-alpine
-
-WORKDIR /app
-
-ENV NODE_ENV=production
-ENV PORT=7000
-
-COPY package*.json ./
-
-RUN npm ci --omit=dev && npm cache clean --force
-
-COPY . .
-
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-
-USER appuser
-
-EXPOSE 7000
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:7000/health || exit 1
-
-CMD ["npm", "start"]
+```text
+Host port 7000 → Container port 7000
 ```
 
-### Test Docker locally
-
-From the repository root:
+### Local Docker test
 
 ```bash
 docker rm -f foodexpress || true
@@ -298,9 +196,9 @@ Expected response:
 
 ---
 
-## Terraform Configuration
+## 7. Terraform Flow
 
-Terraform files are located in:
+Terraform files are inside:
 
 ```text
 terraform/
@@ -308,142 +206,94 @@ terraform/
 
 Terraform creates:
 
-- EC2 instance
+- App EC2 instance
 - Security group
 - SSH key pair
 - Public IP output
-- App URL output
+- Application URL output
 - Health check URL output
 
-### Required ports
-
-The application EC2 security group should allow:
+### Required App EC2 inbound ports
 
 | Port | Purpose |
 |---|---|
-| 22 | SSH from Jenkins |
-| 7000 | FoodExpress API |
+| 22 | SSH access |
+| 7000 | FoodExpress API access |
 
-Jenkins EC2 security group should allow:
+### Required Jenkins EC2 inbound ports
 
 | Port | Purpose |
 |---|---|
-| 22 | SSH |
+| 22 | SSH access |
 | 8080 | Jenkins web UI |
 
-Do not add Jenkins port `8080` to the application EC2 unless Jenkins is installed there. The app EC2 only needs Docker and port `7000`.
+### Duplicate resource protection
 
-### Example Terraform variables
-
-```hcl
-variable "aws_region" {
-  description = "AWS region"
-  type        = string
-  default     = "us-east-1"
-}
-
-variable "project_name" {
-  description = "Project name"
-  type        = string
-  default     = "foodexpress"
-}
-
-variable "instance_type" {
-  description = "EC2 instance type"
-  type        = string
-  default     = "t2.micro"
-}
-
-variable "key_name" {
-  description = "EC2 key pair name"
-  type        = string
-  default     = "foodexpress-auto-key"
-}
-
-variable "public_key" {
-  description = "Public SSH key used to access EC2"
-  type        = string
-  sensitive   = true
-}
-```
-
-### Important Terraform naming rule
-
-To avoid duplicate AWS resource errors, the Jenkinsfile uses unique names per build:
+The Jenkinsfile uses unique names per build:
 
 ```groovy
 PROJECT_NAME = "foodexpress-${env.BUILD_NUMBER}"
 KEY_NAME = "foodexpress-auto-key-${env.BUILD_NUMBER}"
 ```
 
-This prevents errors like:
+This prevents duplicate AWS errors such as:
 
 ```text
-InvalidKeyPair.Duplicate: The keypair already exists
-InvalidGroup.Duplicate: The security group already exists
+InvalidKeyPair.Duplicate
+InvalidGroup.Duplicate
 ```
 
 ---
 
-## Jenkins Server Setup
+## 8. Jenkins Server Setup
 
-Run `deploy.sh` only on the Jenkins EC2 server.
+Run `deploy.sh` only on the **Jenkins EC2 server**.
 
-Do not run `deploy.sh` on the app EC2.
+Do not run it on the App EC2.
+
+### SSH to Jenkins EC2
+
+```bash
+ssh -i your-jenkins-key.pem ubuntu@JENKINS_EC2_PUBLIC_IP
+```
 
 ### Run setup script
 
-SSH into the Jenkins EC2 server:
-
-```bash
-ssh -i your-key.pem ubuntu@JENKINS_EC2_PUBLIC_IP
-```
-
-Create or copy the setup script:
-
-```bash
-nano deploy.sh
-```
-
-Make it executable:
-
 ```bash
 chmod +x deploy.sh
-```
-
-Run it:
-
-```bash
 sudo bash deploy.sh
 ```
 
-Open Jenkins:
+### Open Jenkins
 
 ```text
 http://JENKINS_EC2_PUBLIC_IP:8080
 ```
 
-### Jenkins server Docker permission
+### Verify Jenkins server tools
 
-If Jenkins cannot run Docker commands, run:
+```bash
+docker --version
+terraform version
+aws --version
+git --version
+ssh -V
+```
+
+### Docker permission for Jenkins user
 
 ```bash
 sudo usermod -aG docker jenkins
 sudo systemctl restart jenkins
 ```
 
-For assignment testing only, if Docker permission still fails:
-
-```bash
-sudo chmod 666 /var/run/docker.sock
-sudo systemctl restart jenkins
-```
+Then log back into Jenkins and rebuild the pipeline.
 
 ---
 
-## Jenkins Credentials
+## 9. Jenkins Credentials
 
-Go to:
+In Jenkins, go to:
 
 ```text
 Manage Jenkins → Credentials → System → Global credentials → Add Credentials
@@ -451,31 +301,64 @@ Manage Jenkins → Credentials → System → Global credentials → Add Credent
 
 Create these credentials exactly:
 
-| Credential ID | Kind | Value |
+| Credential ID | Kind | Description |
 |---|---|---|
-| `aws-access-key-id` | Secret text | AWS Access Key ID |
-| `aws-secret-access-key` | Secret text | AWS Secret Access Key |
-| `foodexpress-jwt-secret` | Secret text | JWT secret for the API |
+| `aws-access-key-id` | Secret text | AWS access key ID |
+| `aws-secret-access-key` | Secret text | AWS secret access key |
+| `foodexpress-jwt-secret` | Secret text | JWT secret for API runtime |
 
-If using AWS Academy or temporary AWS credentials, also create:
+If using AWS Academy or temporary credentials, also create:
 
-| Credential ID | Kind | Value |
+| Credential ID | Kind | Description |
 |---|---|---|
-| `aws-session-token` | Secret text | AWS Session Token |
+| `aws-session-token` | Secret text | AWS session token |
 
-For the GitHub repository section in Jenkins Pipeline configuration, use:
+For the GitHub repository field in Jenkins, use:
 
 ```text
 Credentials: none
 ```
 
-This is correct if the repository is public. AWS credentials do not appear in the Git credentials dropdown because they are used inside `Jenkinsfile` through `withCredentials(...)`.
+This is correct because the repository is public. AWS credentials are used inside the Jenkinsfile, not in the Git dropdown.
 
 ---
 
-## Jenkins Pipeline Flow
+## 10. Jenkins Job Configuration
 
-The Jenkins pipeline performs these stages:
+Create a Jenkins Pipeline job:
+
+```text
+New Item → Pipeline → OK
+```
+
+Recommended job name:
+
+```text
+Food-express-api
+```
+
+Pipeline configuration:
+
+```text
+Definition: Pipeline script from SCM
+SCM: Git
+Repository URL: https://github.com/Dapravith/Task7-Terraform-and-Jenkins.git
+Credentials: none
+Branch Specifier: */main
+Script Path: Jenkinsfile
+```
+
+Click:
+
+```text
+Save → Build Now
+```
+
+---
+
+## 11. Jenkins Pipeline Stages
+
+The Jenkinsfile runs these stages:
 
 ```text
 Checkout Code
@@ -498,102 +381,30 @@ Deploy Container on EC2
 Verify Application
 ```
 
-### Pipeline responsibilities
+### Pipeline summary
 
-| Stage | Purpose |
+| Stage | What happens |
 |---|---|
-| Checkout Code | Clone the repository from GitHub |
-| Verify Project Structure | Confirm required folders and files exist |
-| Verify Required Tools | Check Docker, Terraform, AWS CLI, SSH |
-| Validate AWS Credentials | Confirm Jenkins can access AWS |
-| Generate SSH Key Pair | Create temporary key for Jenkins to access app EC2 |
-| Validate Node App | Confirm package.json has a start script |
-| Build Docker Image | Build FoodExpress API Docker image |
-| Save Docker Image to TAR | Export Docker image as a `.tar` file |
-| Terraform Init Validate Plan | Initialize, validate, and plan infrastructure |
-| Terraform Apply | Create AWS EC2 resources |
-| Get EC2 Public IP | Read EC2 public IP from Terraform output |
-| Wait for EC2 SSH | Wait until EC2 accepts SSH |
-| Wait for Cloud Init | Wait until EC2 initialization finishes |
-| Verify Docker on EC2 | Confirm Docker is installed and running |
-| Prepare Runtime Env File | Create environment file for container |
-| Copy Files to EC2 | Copy Docker image and env file to EC2 |
-| Deploy Container on EC2 | Load image and run container on port `7000` |
-| Verify Application | Test `/health` endpoint through EC2 public IP |
+| Checkout Code | Jenkins pulls code from GitHub |
+| Build Docker Image | Jenkins builds API Docker image |
+| Save Docker Image to TAR | Jenkins exports the image |
+| Terraform Apply | Jenkins creates App EC2 through Terraform |
+| Copy Files to EC2 | Jenkins copies image and environment file |
+| Deploy Container | App EC2 runs the API container |
+| Verify Application | Jenkins tests `/health` by public IP |
 
 ---
 
-## How to Run the Pipeline
+## 12. Verify Deployment
 
-### Step 1: Create Jenkins Pipeline job
-
-In Jenkins:
-
-```text
-New Item → Pipeline → OK
-```
-
-Example job name:
-
-```text
-Food-express-api
-```
-
-### Step 2: Configure pipeline from GitHub
-
-In the Pipeline section:
-
-```text
-Definition: Pipeline script from SCM
-SCM: Git
-Repository URL: https://github.com/Dapravith/Task7-Terraform-and-Jenkins.git
-Credentials: none
-Branch Specifier: */main
-Script Path: Jenkinsfile
-```
-
-Click:
-
-```text
-Save
-```
-
-### Step 3: Run build
-
-```text
-Food-express-api → Build Now
-```
-
-Open:
-
-```text
-Build Number → Console Output
-```
-
-Watch until the final stage succeeds:
-
-```text
-Verify Application
-```
-
----
-
-## How to Verify the Deployment
-
-After successful deployment, Jenkins prints:
+After a successful build, Jenkins prints:
 
 ```text
 Application URL: http://EC2_PUBLIC_IP:7000
 Health Check URL: http://EC2_PUBLIC_IP:7000/health
 ```
 
-Example:
-
-```text
-http://18.212.231.44:7000/health
-```
-
-Test from terminal:
+Test with curl:
 
 ```bash
 curl http://EC2_PUBLIC_IP:7000/health
@@ -610,42 +421,86 @@ Expected response:
 
 ---
 
-## Postman Testing
+## 13. SSH to App EC2
 
-Use this request:
+The App EC2 SSH key is generated by Jenkins during the pipeline.
 
-```http
-GET http://EC2_PUBLIC_IP:7000/health
-```
-
-Important:
+The private key is on the Jenkins EC2 server:
 
 ```text
-Body: none
+/var/lib/jenkins/workspace/Food-express-api/sshkey/id_rsa
 ```
 
-Do not send JSON body to `/health`.
+SSH from Jenkins EC2 to App EC2:
 
-Expected response:
+```bash
+sudo ssh -i /var/lib/jenkins/workspace/Food-express-api/sshkey/id_rsa \
+  -o StrictHostKeyChecking=no \
+  ubuntu@APP_EC2_PUBLIC_IP
+```
+
+Check container status:
+
+```bash
+sudo docker ps -a
+sudo docker logs foodexpress --tail 100
+curl http://localhost:7000/health
+```
+
+If SSH returns `Permission denied (publickey)`, the private key does not match the EC2 key pair.
+
+---
+
+## 14. Postman Test Order
+
+Use this order:
+
+```text
+1. GET  /health
+2. POST /auth/register
+3. POST /auth/login
+4. GET  /auth/me
+5. POST /items
+6. GET  /items
+7. GET  /items/:id
+8. PUT  /items/:id
+9. DELETE /items/:id
+```
+
+### Register body
 
 ```json
 {
-  "status": "healthy",
-  "service": "FoodExpress API"
+  "username": "dapravith",
+  "password": "Password123"
+}
+```
+
+### Login body
+
+```json
+{
+  "username": "dapravith",
+  "password": "Password123"
+}
+```
+
+### Create item body
+
+```json
+{
+  "name": "Chicken Burger",
+  "price": 3.5
 }
 ```
 
 ---
 
-## Common Errors and Fixes
+## 15. Common Errors and Fixes
 
-### 1. `npm error Missing script: "start"`
+### `npm error Missing script: "start"`
 
-Cause:
-
-`package.json` does not have a start script.
-
-Fix:
+Add this to `Food-Express-API/package.json`:
 
 ```json
 "scripts": {
@@ -653,87 +508,29 @@ Fix:
 }
 ```
 
----
+### `node: not found` in Jenkins
 
-### 2. `node: not found` in Jenkins
+The Jenkins server does not need Node.js if the app is built inside Docker. Validate the app with shell commands, or install Node.js if the pipeline requires direct Node commands.
 
-Cause:
+### `InvalidKeyPair.Duplicate`
 
-Jenkins server does not have Node.js installed.
+The AWS key pair name already exists. Use a unique `KEY_NAME` per build.
 
-Fix:
+### `InvalidGroup.Duplicate`
 
-Do not run Node commands directly in Jenkins unless Node is installed. The application should build inside Docker using:
+The AWS security group name already exists. Use a unique `PROJECT_NAME` per build.
 
-```dockerfile
-FROM node:18-alpine
-```
+### `InvalidClientTokenId`
 
-For Jenkins validation, use shell commands such as `grep` instead of `node -e`.
-
----
-
-### 3. `InvalidKeyPair.Duplicate`
-
-Cause:
-
-AWS key pair with the same name already exists.
-
-Fix:
-
-Use unique key names per Jenkins build:
-
-```groovy
-KEY_NAME = "foodexpress-auto-key-${env.BUILD_NUMBER}"
-```
-
----
-
-### 4. `InvalidGroup.Duplicate`
-
-Cause:
-
-Security group with the same name already exists.
-
-Fix:
-
-Use unique project names per Jenkins build:
-
-```groovy
-PROJECT_NAME = "foodexpress-${env.BUILD_NUMBER}"
-```
-
----
-
-### 5. `InvalidClientTokenId`
-
-Cause:
-
-AWS credentials are invalid, expired, or missing session token.
-
-Fix:
-
-Check credentials:
+AWS credentials are invalid, expired, or missing a session token. Update Jenkins credentials and test with:
 
 ```bash
 aws sts get-caller-identity
 ```
 
-If using AWS Academy, add `aws-session-token` in Jenkins credentials and export it inside the Jenkinsfile.
+### `Connection refused` on port `7000`
 
----
-
-### 6. `Connection refused` on port `7000`
-
-Possible causes:
-
-- Docker container is restarting
-- API is not listening on `0.0.0.0`
-- Missing package start script
-- Port `7000` is not open in Security Group
-- Container did not start correctly
-
-Debug on app EC2:
+Debug on App EC2:
 
 ```bash
 sudo docker ps -a
@@ -742,132 +539,47 @@ sudo ss -tulnp | grep 7000
 curl http://localhost:7000/health
 ```
 
----
+Check that:
 
-### 7. Jenkins cannot run Docker
-
-Cause:
-
-Jenkins user does not have permission to access Docker socket.
-
-Fix:
-
-```bash
-sudo usermod -aG docker jenkins
-sudo systemctl restart jenkins
-```
-
-For assignment testing only:
-
-```bash
-sudo chmod 666 /var/run/docker.sock
-sudo systemctl restart jenkins
-```
+- The container is running
+- `package.json` has `start`
+- Express listens on `0.0.0.0`
+- App EC2 security group allows port `7000`
 
 ---
 
-## Useful Commands
+## 16. Assignment Screenshot Checklist
 
-### Check Jenkins server tools
+Capture these screenshots:
 
-```bash
-docker --version
-terraform version
-aws --version
-git --version
-ssh -V
-```
-
-### Check AWS credentials
-
-```bash
-aws sts get-caller-identity
-```
-
-### Check Docker container on app EC2
-
-```bash
-sudo docker ps -a
-sudo docker logs foodexpress --tail 100
-sudo docker images
-```
-
-### Stop and remove container manually
-
-```bash
-sudo docker stop foodexpress || true
-sudo docker rm foodexpress || true
-```
-
-### Test API locally on app EC2
-
-```bash
-curl http://localhost:7000/health
-```
-
-### Test API publicly
-
-```bash
-curl http://EC2_PUBLIC_IP:7000/health
-```
-
-### Clean local Docker image on Jenkins server
-
-```bash
-docker rmi foodexpress-api:latest || true
-```
+- GitHub repository structure
+- Jenkins job configuration
+- Jenkinsfile script
+- Successful Jenkins pipeline stages
+- Jenkins console output with Terraform apply success
+- AWS EC2 App instance running
+- AWS security group with ports `22` and `7000`
+- Docker container running on App EC2
+- Postman API test by public IP
+- Successful `/health` response
 
 ---
 
-## Required Assignment Screenshots
+## 17. Final Result
 
-Capture these screenshots for submission:
+Final application URL:
 
-1. GitHub repository with project files.
-2. Jenkins Pipeline job configuration.
-3. Jenkinsfile script.
-4. Jenkins successful pipeline stages.
-5. Jenkins console output showing:
-   - Docker build success
-   - Terraform apply success
-   - EC2 public IP output
-   - Container deployment success
-   - Health check success
-6. AWS EC2 instance running.
-7. AWS Security Group showing:
-   - Port `22`
-   - Port `7000`
-8. Docker container running on app EC2:
-
-```bash
-sudo docker ps
-```
-
-9. Postman test:
-
-```http
-GET http://EC2_PUBLIC_IP:7000/health
-```
-
-10. Successful API response.
-
----
-
-## Final Result
-
-When the pipeline succeeds, the FoodExpress API is available at:
-
-```bash
+```text
 http://EC2_PUBLIC_IP:7000
 ```
 
-Health check endpoint:
+Health check URL:
 
-```bash
+```text
 http://EC2_PUBLIC_IP:7000/health
 ```
 
-Expected health response:
+Expected response:
 
 ```json
 {
@@ -878,21 +590,8 @@ Expected health response:
 
 ---
 
-## Notes
-
-- The repository is cloned only by Jenkins.
-- The app EC2 does not need to clone the repository.
-- The app EC2 only needs Docker and the runtime container.
-- Jenkins is responsible for CI/CD automation.
-- Terraform is responsible for infrastructure provisioning.
-- Docker is responsible for packaging and running the API.
-- Port `7000` is used for the FoodExpress API.
-- Port `8080` is used only for Jenkins UI.
-
----
-
 ## Author
 
-Rotha Dapravith
+**Rotha Dapravith**
 
 GitHub: [Dapravith](https://github.com/Dapravith)
