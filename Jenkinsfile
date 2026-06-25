@@ -131,17 +131,16 @@ pipeline {
 
                     echo "Validating Node.js app package.json..."
 
-                    node -e "
-                    const pkg = require('./${APP_DIR}/package.json');
+                    test -f ${APP_DIR}/package.json
+                    test -f ${APP_DIR}/index.js
 
-                    if (!pkg.scripts || !pkg.scripts.start) {
-                        console.error('ERROR: package.json is missing scripts.start');
-                        process.exit(1);
-                    }
+                    if ! grep -q '"start"[[:space:]]*:' ${APP_DIR}/package.json; then
+                        echo "ERROR: package.json is missing scripts.start"
+                        echo "Please add: \\"start\\": \\"node index.js\\""
+                        exit 1
+                    fi
 
-                    console.log('Start script found:', pkg.scripts.start);
-                    "
-
+                    echo "package.json has start script."
                     echo "Node.js app validation passed."
                 '''
             }
