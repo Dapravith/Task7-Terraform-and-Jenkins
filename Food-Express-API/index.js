@@ -5,8 +5,8 @@ const bcrypt = require("bcryptjs");
 const app = express();
 app.use(express.json());
 
-const PORT = 7000;
-const JWT_SECRET = "your_super_secret_key";
+const PORT = process.env.PORT || 7000;
+const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_key";
 
 // In-memory data (for demo only)
 const users = [];
@@ -231,6 +231,6 @@ app.delete("/items/:id", authMiddleware, (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server start running on port ${PORT}`);
 });
