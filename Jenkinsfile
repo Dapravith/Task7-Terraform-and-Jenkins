@@ -5,6 +5,7 @@ pipeline {
         timestamps()
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '10'))
+        skipDefaultCheckout(true)
     }
 
     environment {
@@ -16,11 +17,13 @@ pipeline {
 
         CONTAINER_NAME = "foodexpress"
 
-        // App and EC2 public port
         APP_PORT = "7000"
         HOST_PORT = "7000"
 
-        KEY_NAME = "foodexpress-auto-key"
+        // Important: unique names to avoid duplicate AWS resource errors
+        PROJECT_NAME = "foodexpress-${env.BUILD_NUMBER}"
+        KEY_NAME = "foodexpress-auto-key-${env.BUILD_NUMBER}"
+
         TF_DIR = "terraform"
         APP_DIR = "Food-Express-API"
     }
@@ -69,7 +72,6 @@ pipeline {
                     terraform version
                     aws --version
                     ssh -V || true
-                    scp -V || true
 
                     echo "Required tools are available."
                 '''
@@ -104,14 +106,11 @@ pipeline {
                 sh '''
                     set -e
 
+                    rm -rf sshkey
                     mkdir -p sshkey
 
-                    if [ ! -f sshkey/id_rsa ]; then
-                        echo "Generating SSH key pair..."
-                        ssh-keygen -t rsa -b 4096 -f sshkey/id_rsa -N ""
-                    else
-                        echo "SSH key pair already exists."
-                    fi
+                    echo "Generating SSH key pair..."
+                    ssh-keygen -t rsa -b 4096 -f sshkey/id_rsa -N ""
 
                     chmod 600 sshkey/id_rsa
                     chmod 644 sshkey/id_rsa.pub
@@ -119,6 +118,7 @@ pipeline {
                     echo "Public key format:"
                     head -c 20 sshkey/id_rsa.pub
                     echo ""
+
                     echo "SSH key pair is ready."
                 '''
             }
@@ -173,7 +173,7 @@ pipeline {
                             export AWS_DEFAULT_REGION="${AWS_REGION}"
 
                             echo "Initializing Terraform..."
-                            terraform init -input=false
+                            terraform init -input=false -reconfigure
 
                             echo "Formatting Terraform files..."
                             terraform fmt -recursive
@@ -182,8 +182,11 @@ pipeline {
                             terraform validate
 
                             echo "Creating Terraform plan..."
+                            rm -f tfplan
+
                             terraform plan -input=false -out=tfplan \
                                 -var="aws_region=${AWS_REGION}" \
+                                -var="project_name=${PROJECT_NAME}" \
                                 -var="key_name=${KEY_NAME}" \
                                 -var="public_key=$(cat ../sshkey/id_rsa.pub)"
                         '''
