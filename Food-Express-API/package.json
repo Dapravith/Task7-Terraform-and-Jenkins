@@ -1,13 +1,14 @@
 {
   "name": "task7-terraform-and-jenkins",
   "version": "1.0.0",
-  "description": "",
+  "description": "FoodExpress API for Terraform and Jenkins deployment",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "test": "echo \"No tests configured\" && exit 0"
   },
   "keywords": [],
-  "author": "",
+  "author": "Dapravith",
   "license": "ISC",
   "dependencies": {
     "bcryptjs": "^3.0.3",

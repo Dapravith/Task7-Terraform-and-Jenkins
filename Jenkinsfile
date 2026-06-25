@@ -124,6 +124,29 @@ pipeline {
             }
         }
 
+        stage("Validate Node App") {
+            steps {
+                sh '''
+                    set -e
+
+                    echo "Validating Node.js app package.json..."
+
+                    node -e "
+                    const pkg = require('./${APP_DIR}/package.json');
+
+                    if (!pkg.scripts || !pkg.scripts.start) {
+                        console.error('ERROR: package.json is missing scripts.start');
+                        process.exit(1);
+                    }
+
+                    console.log('Start script found:', pkg.scripts.start);
+                    "
+
+                    echo "Node.js app validation passed."
+                '''
+            }
+        }
+
         stage("Build Docker Image") {
             steps {
                 sh '''
