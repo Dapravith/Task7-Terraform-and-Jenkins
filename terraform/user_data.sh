@@ -1,11 +1,6 @@
 #!/bin/bash
 set -eux
 
-# If script is executed manually without root, rerun with sudo
-if [ "$EUID" -ne 0 ]; then
-  exec sudo bash "$0" "$@"
-fi
-
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -y
